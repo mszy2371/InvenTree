@@ -1056,7 +1056,7 @@ SYSTEM_SETTINGS: dict[str, InvenTreeSettingsKeyType] = {
     'ENABLE_PLUGINS_EVENTS': {
         'name': _('Enable event integration'),
         'description': _('Enable plugins to respond to internal events'),
-        'default': False,
+        'default': True,
         'validator': bool,
         'after_save': reload_plugin_registry,
     },
