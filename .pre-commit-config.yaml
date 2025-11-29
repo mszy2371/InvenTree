@@ -22,7 +22,7 @@ repos:
     hooks:
     - id: ruff-format
       args: [--preview]
-    - id: ruff
+    - id: ruff-check
       args: [
         --fix,
         # --unsafe-fixes,
