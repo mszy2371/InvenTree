@@ -24,16 +24,8 @@ class InvoiceItemInline(admin.TabularInline):
     """Inline display of invoice items."""
 
     model = InvoiceItem
-    extra = 0
-    readonly_fields = (
-        'description',
-        'seller_sku',
-        'quantity',
-        'unit_price',
-        'total_price',
-        'tax_rate',
-        'part_actions',
-    )
+    extra = 1  # Allow adding new items
+    readonly_fields = ('part_actions',)
     fields = (
         'part',
         'part_actions',
@@ -41,13 +33,15 @@ class InvoiceItemInline(admin.TabularInline):
         'seller_sku',
         'quantity',
         'unit_price',
+        'total_price',
+        'tax_rate',
         'matched',
         'notes',
     )
     raw_id_fields = (
         'part',
     )  # Use popup instead of dropdown for Part selection (6000+ parts!)
-    can_delete = False
+    can_delete = True  # Allow deleting items
 
     def part_actions(self, obj):
         """Show action buttons for unmatched items."""
@@ -91,6 +85,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'status_badge',
         'total_items',
         'missing_parts_count',
+        'purchase_order_link',
         'match_parts_link',
         'created_at',
     )
@@ -104,6 +99,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'total_net_amount',
         'total_vat_amount',
         'invoice_total',
+        'purchase_order',
     )
 
     fieldsets = (
@@ -612,6 +608,21 @@ class InvoiceAdmin(admin.ModelAdmin):
         return '-'
 
     match_parts_link.short_description = 'Match'
+
+    def purchase_order_link(self, obj):
+        """Return link to Purchase Order if exists."""
+        if obj.purchase_order:
+            url = reverse(
+                'admin:order_purchaseorder_change', args=[obj.purchase_order.pk]
+            )
+            return format_html(
+                '<a href="{}" style="background:#28a745;color:white;padding:4px 10px;border-radius:4px;text-decoration:none;">PO-{}</a>',
+                url,
+                obj.purchase_order.pk,
+            )
+        return format_html('<span style="color:#888;padding:4px 10px;">—</span>')
+
+    purchase_order_link.short_description = 'Purchase Order'
 
     @admin.action(description='Extract invoice data from PDF')
     def extract_invoice_data(self, request, queryset):

@@ -408,67 +408,240 @@ class ConnectBeautyExtractor(BaseInvoiceExtractor):
             )
 
     def _extract_products(self, all_text: str, result: dict) -> None:
-        # CB format: Product lines followed by SKU:, then qty, price, vat%, £total
-        # Each product spans multiple lines until SKU: marker
+        """Extract products from Connect Beauty invoice.
+
+        CB format varies:
+        - Most products: description lines, then SKU: on separate line, then sku value
+        - Some products: SKU: O-XXX on same line
+        - Page breaks can split products mid-description
+        - Some products have SKU split across pages (SKU: on page 1, value on page 2)
+
+        Pattern: description, SKU marker, sku_value, qty, price, vat%, £total
+        """
         lines = all_text.split('\n')
+        lines = [ln.strip() for ln in lines]
+
+        # First pass: find orphaned SKU values at page breaks
+        # These are SKU codes that appear after page headers without SKU: marker
+        orphan_skus = self._find_orphan_skus(lines)
 
         i = 0
-        while i < len(lines) - 5:
-            line = lines[i].strip()
+        while i < len(lines):
+            line = lines[i]
 
-            # Look for SKU: marker
+            # Pattern 1: "SKU:" on its own line
             if line == 'SKU:':
-                # Go back to find product description
-                desc_lines = []
-                j = i - 1
-                while j >= 0 and lines[j].strip() not in [
-                    'Total',
-                    'VAT',
-                    'Unit Price',
-                    'Quantity',
-                    'Description',
-                    'Item',
-                ]:
-                    desc_line = lines[j].strip()
-                    # Stop if we hit previous product's price
-                    if desc_line.startswith('£') or desc_line.endswith('%'):
-                        break
-                    if desc_line:
-                        desc_lines.insert(0, desc_line)
-                    j -= 1
+                # Check if next line is a valid SKU or if it's a number (page break case)
+                next_line = lines[i + 1] if i + 1 < len(lines) else ''
 
-                description = ' '.join(desc_lines)
-
-                # Next line is SKU value
-                sku_line = lines[i + 1].strip() if i + 1 < len(lines) else ''
-                # Remove O- prefix if present
-                sku = sku_line.lstrip('O-')
-
-                # Next lines: qty, price, vat%, £total
-                qty_line = lines[i + 2].strip() if i + 2 < len(lines) else ''
-                price_line = lines[i + 3].strip() if i + 3 < len(lines) else ''
-                vat_line = lines[i + 4].strip() if i + 4 < len(lines) else ''
-                total_line = lines[i + 5].strip() if i + 5 < len(lines) else ''
-
-                if qty_line.isdigit() and vat_line.endswith('%'):
-                    quantity = int(qty_line)
-                    unit_price = self._safe_float_convert(price_line)
-                    vat = self._safe_float_convert(vat_line.rstrip('%'))
-                    total_price = self._safe_float_convert(total_line.replace('£', ''))
-
-                    if quantity > 0 and description:
-                        result['products'].append({
-                            'description': description,
-                            'seller_sku': sku,
-                            'quantity': quantity,
-                            'tax': vat,
-                            'unit_price': unit_price,
-                            'total_price': total_price,
-                        })
+                if next_line.isdigit():
+                    # Page break case: SKU value is on next page
+                    # Try to find matching orphan SKU
+                    product = self._extract_split_product(lines, i, orphan_skus)
+                    if product:
+                        result['products'].append(product)
+                    i += 5  # Skip qty, price, vat%, £total
+                    continue
+                else:
+                    # Normal case: SKU value on next line
+                    product = self._extract_product_at_sku_marker(lines, i)
+                    if product:
+                        result['products'].append(product)
                     i += 6
                     continue
 
+            # Pattern 2: "SKU: O-" prefix on same line (SKU value on next line)
+            if line == 'SKU: O-':
+                product = self._extract_product_at_sku_marker(
+                    lines, i, strip_o_prefix=True
+                )
+                if product:
+                    result['products'].append(product)
+                i += 6
+                continue
+
             i += 1
+
+    def _find_orphan_skus(self, lines: list) -> dict:
+        """Find SKU values that appear after page break without SKU: marker.
+
+        Returns dict mapping orphan SKU to its line index and associated description.
+        """
+        orphans = {}
+        for i, line in enumerate(lines):
+            # Look for pattern: after "Amount Paid" or page total, description, then SKU code
+            if self._looks_like_sku(line):
+                # Check if previous lines have description (not SKU: marker)
+                if (
+                    i > 0
+                    and lines[i - 1] != 'SKU:'
+                    and not lines[i - 1].startswith('SKU:')
+                ):
+                    # Check if followed by qty, price, vat%, £total (or just description)
+                    if i + 1 < len(lines):
+                        # Collect description going back
+                        desc_lines = []
+                        j = i - 1
+                        while j >= 0:
+                            prev = lines[j]
+                            if (
+                                prev.startswith('£') and 'Amount' not in lines[j - 1]
+                                if j > 0
+                                else True
+                            ):
+                                break
+                            if prev in [
+                                'Total excl. VAT',
+                                'Total incl. VAT',
+                                'VAT (GB VAT) 20%',
+                                'Amount Paid',
+                            ]:
+                                break
+                            if 'connectbeauty' in prev.lower():
+                                break
+                            if prev:
+                                desc_lines.insert(0, prev)
+                            j -= 1
+
+                        orphans[line] = {
+                            'index': i,
+                            'description': ' '.join(desc_lines),
+                        }
+        return orphans
+
+    def _looks_like_sku(self, text: str) -> bool:
+        """Check if text looks like a CB SKU (uppercase letters + numbers)."""
+        if not text or len(text) < 6:
+            return False
+        # SKU pattern: uppercase letters followed by numbers, e.g. NYXEYEEPI007
+        return bool(re.match(r'^[A-Z]{3,}[A-Z0-9]*\d{2,}$', text))
+
+    def _extract_split_product(
+        self, lines: list, sku_marker_idx: int, orphan_skus: dict
+    ) -> dict | None:
+        """Extract product where SKU: is on one page but value on next page."""
+        # Get description from before SKU: marker
+        desc_lines = []
+        j = sku_marker_idx - 1
+        while j >= 0:
+            desc_line = lines[j]
+            if desc_line in [
+                'Total',
+                'VAT',
+                'Unit Price',
+                'Quantity',
+                'Description',
+                'Item',
+            ]:
+                break
+            if desc_line.startswith('£') or desc_line.endswith('%'):
+                break
+            if 'connectbeauty' in desc_line.lower():
+                break
+            if desc_line:
+                desc_lines.insert(0, desc_line)
+            j -= 1
+
+        description_part1 = ' '.join(desc_lines)
+
+        # Data after SKU: marker (qty, price, vat%, £total)
+        qty_line = lines[sku_marker_idx + 1] if sku_marker_idx + 1 < len(lines) else ''
+        price_line = (
+            lines[sku_marker_idx + 2] if sku_marker_idx + 2 < len(lines) else ''
+        )
+        vat_line = lines[sku_marker_idx + 3] if sku_marker_idx + 3 < len(lines) else ''
+        total_line = (
+            lines[sku_marker_idx + 4] if sku_marker_idx + 4 < len(lines) else ''
+        )
+
+        # Find matching orphan SKU (the one with description continuing this product)
+        for sku, orphan_data in orphan_skus.items():
+            # Check if orphan description continues our product
+            orphan_desc = orphan_data['description']
+            if orphan_desc:
+                # Build full description
+                full_description = f'{description_part1} {orphan_desc}'
+                return self._build_product(
+                    full_description, sku, qty_line, price_line, vat_line, total_line
+                )
+
+        return None
+
+    def _extract_product_at_sku_marker(
+        self, lines: list, sku_idx: int, strip_o_prefix: bool = False
+    ) -> dict | None:
+        """Extract product when SKU: is on its own line."""
+        if sku_idx + 5 >= len(lines):
+            return None
+
+        # Go back to find product description
+        desc_lines = []
+        j = sku_idx - 1
+        while j >= 0:
+            desc_line = lines[j]
+            # Stop at headers or previous product's total
+            if desc_line in [
+                'Total',
+                'VAT',
+                'Unit Price',
+                'Quantity',
+                'Description',
+                'Item',
+            ]:
+                break
+            if desc_line.startswith('£') or desc_line.endswith('%'):
+                break
+            # Stop at footer/header markers
+            if 'connectbeauty' in desc_line.lower() or 'Connect Beauty' in desc_line:
+                break
+            if desc_line:
+                desc_lines.insert(0, desc_line)
+            j -= 1
+
+        description = ' '.join(desc_lines)
+
+        # SKU value on next line
+        sku_line = lines[sku_idx + 1]
+        sku = sku_line.lstrip('O-') if strip_o_prefix else sku_line
+
+        # Following lines: qty, price, vat%, £total
+        qty_line = lines[sku_idx + 2]
+        price_line = lines[sku_idx + 3]
+        vat_line = lines[sku_idx + 4]
+        total_line = lines[sku_idx + 5]
+
+        return self._build_product(
+            description, sku, qty_line, price_line, vat_line, total_line
+        )
+
+    def _build_product(
+        self,
+        description: str,
+        sku: str,
+        qty_line: str,
+        price_line: str,
+        vat_line: str,
+        total_line: str,
+    ) -> dict | None:
+        """Build product dict from extracted data."""
+        if not qty_line.isdigit() or not vat_line.endswith('%'):
+            return None
+
+        quantity = int(qty_line)
+        unit_price = self._safe_float_convert(price_line)
+        vat = self._safe_float_convert(vat_line.rstrip('%'))
+        total_price = self._safe_float_convert(total_line.replace('£', ''))
+
+        if quantity > 0 and description:
+            return {
+                'description': description,
+                'seller_sku': sku,
+                'quantity': quantity,
+                'tax': vat,
+                'unit_price': unit_price,
+                'total_price': total_price,
+            }
+        return None
 
 
 class CherryExtractor(BaseInvoiceExtractor):

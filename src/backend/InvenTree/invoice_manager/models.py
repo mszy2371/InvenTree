@@ -48,6 +48,16 @@ class Invoice(models.Model):
         blank=True, help_text='Error details if processing failed'
     )
 
+    # Purchase Order link
+    purchase_order = models.ForeignKey(
+        'order.PurchaseOrder',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='invoices',
+        help_text='Purchase Order created from this invoice',
+    )
+
     # Tracking
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
