@@ -1,0 +1,179 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block title %}Create Part from Invoice Item{% endblock title %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    body {
+        background: #1a1a2e !important;
+        color: #e0e0e0 !important;
+    }
+    #container {
+        background: #1a1a2e !important;
+    }
+    #content {
+        background: #16213e !important;
+        border-radius: 8px;
+        padding: 20px;
+    }
+    .info-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+    }
+    .info-table th {
+        text-align: left;
+        padding: 10px;
+        background: #0f3460;
+        color: #e94560;
+        border: 1px solid #0f3460;
+        width: 200px;
+    }
+    .info-table td {
+        padding: 10px;
+        background: #1a1a2e;
+        color: #e0e0e0;
+        border: 1px solid #0f3460;
+    }
+    .btn-create {
+        background: #28a745;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        cursor: pointer;
+        margin-right: 10px;
+    }
+    .btn-create:hover {
+        background: #218838;
+    }
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .btn-cancel:hover {
+        background: #5a6268;
+    }
+    .warning-box {
+        background: #0f3460;
+        border-left: 4px solid #e94560;
+        padding: 15px;
+        margin: 20px 0;
+        border-radius: 0 5px 5px 0;
+    }
+    h1 {
+        color: #e94560 !important;
+    }
+    .form-row {
+        margin-bottom: 15px;
+    }
+    .form-row label {
+        display: block;
+        color: #e94560;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .form-row input {
+        width: 100%;
+        max-width: 500px;
+        padding: 10px;
+        border: 1px solid #4a5568;
+        border-radius: 5px;
+        background: #1a1a2e;
+        color: #e0e0e0;
+        font-size: 14px;
+    }
+    .form-row input:focus {
+        outline: none;
+        border-color: #e94560;
+    }
+    .form-row .help-text {
+        color: #718096;
+        font-size: 12px;
+        margin-top: 5px;
+    }
+    .info-row {
+        display: flex;
+        margin-bottom: 10px;
+    }
+    .info-row .label {
+        color: #e94560;
+        font-weight: bold;
+        width: 180px;
+        flex-shrink: 0;
+    }
+    .info-row .value {
+        color: #e0e0e0;
+    }
+</style>
+{% endblock extrahead %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    › <a href="{% url 'admin:invoice_manager_invoice_changelist' %}">Invoices</a>
+    › <a href="{% url 'admin:invoice_manager_invoice_change' invoice.pk %}">{{ invoice.invoice_number }}</a>
+    › Create Part
+</div>
+{% endblock breadcrumbs %}
+
+{% block content %}
+<h1>Create Part from Invoice Item</h1>
+
+<div class="warning-box">
+    <strong>This will create:</strong>
+    <ul>
+        <li>A new <strong>Part</strong> in the system</li>
+        <li>A new <strong>SupplierPart</strong> linked to {{ supplier.name|default:"(no supplier)" }}</li>
+        <li>Automatically match this invoice item to the new Part</li>
+    </ul>
+</div>
+
+<div class="info-row">
+    <span class="label">Original Description:</span>
+    <span class="value">{{ item.description }}</span>
+</div>
+<div class="info-row">
+    <span class="label">Supplier:</span>
+    <span class="value">{{ supplier.name|default:"(no supplier assigned)" }}</span>
+</div>
+
+<hr style="border-color: #4a5568; margin: 20px 0;">
+
+<form method="post">
+    {% csrf_token %}
+
+    <div class="form-row">
+        <label for="part_name">Part Name *</label>
+        <input type="text" id="part_name" name="part_name" value="{{ parsed_name }}" required>
+        <div class="help-text">Name for the new Part in InvenTree</div>
+    </div>
+
+    <div class="form-row">
+        <label for="supplier_sku">Supplier SKU</label>
+        <input type="text" id="supplier_sku" name="supplier_sku" value="{{ sku|default:'' }}">
+        <div class="help-text">SKU/Code used by the supplier (optional)</div>
+    </div>
+
+    <div class="form-row">
+        <label for="unit_price">Unit Price ({{ invoice.currency|default:'GBP' }})</label>
+        <input type="number" id="unit_price" name="unit_price" value="{{ item.unit_price }}" step="0.01" min="0">
+        <div class="help-text">Price per unit from the supplier</div>
+    </div>
+
+    <div style="margin-top: 25px;">
+        <button type="submit" class="btn-create">✓ Create Part & SupplierPart</button>
+        <a href="{% url 'admin:invoice_manager_invoice_change' invoice.pk %}" class="btn-cancel">Cancel</a>
+    </div>
+</form>
+
+{% endblock content %}

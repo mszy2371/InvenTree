@@ -91,6 +91,13 @@ CONSOLE_LOG = get_boolean_setting('INVENTREE_CONSOLE_LOG', 'console_log', True)
 
 logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s %(levelname)s %(message)s')
 
+# Suppress specific RuntimeWarnings about database access during app initialization
+import warnings
+
+warnings.filterwarnings(
+    'ignore', message='.*Accessing the database during app initialization.*'
+)
+
 if LOG_LEVEL not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
     LOG_LEVEL = 'WARNING'  # pragma: no cover
 DEFAULT_LOG_HANDLER = ['console'] if CONSOLE_LOG else []
@@ -293,6 +300,7 @@ INSTALLED_APPS = [
     'machine.apps.MachineConfig',
     'data_exporter.apps.DataExporterConfig',
     'importer.apps.ImporterConfig',
+    'invoice_manager.apps.InvoiceManagerConfig',
     'web',
     'generic',
     'InvenTree.apps.InvenTreeConfig',  # InvenTree app runs last

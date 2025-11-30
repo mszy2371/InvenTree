@@ -772,3 +772,63 @@ class DataImportRow(models.Model):
                 self.session.check_complete()
 
         return result
+
+
+class SupplierProductImportSession(models.Model):
+    """Database model for importing supplier product lists from CSV files."""
+
+    class StatusChoices(models.TextChoices):
+        """Status choices for import sessions."""
+
+        PENDING = 'pending', _('Pending')
+        IN_PROGRESS = 'in_progress', _('In Progress')
+        COMPLETED = 'completed', _('Completed')
+        FAILED = 'failed', _('Failed')
+
+    # Core fields
+    timestamp = models.DateTimeField(auto_now_add=True, verbose_name=_('Created'))
+    updated = models.DateTimeField(auto_now=True, verbose_name=_('Updated'))
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, blank=True, null=True, verbose_name=_('User')
+    )
+
+    # Import data
+    data_file = models.FileField(
+        upload_to='supplier_imports',
+        verbose_name=_('CSV File'),
+        help_text=_('CSV file containing supplier product data'),
+    )
+    supplier_name = models.CharField(
+        max_length=255,
+        verbose_name=_('Supplier Name'),
+        help_text=_('Name of the supplier for these products'),
+    )
+
+    # Status
+    status = models.CharField(
+        max_length=20,
+        choices=StatusChoices.choices,
+        default=StatusChoices.PENDING,
+        verbose_name=_('Status'),
+    )
+
+    # Results
+    parts_created = models.PositiveIntegerField(
+        default=0, verbose_name=_('Parts Created')
+    )
+    supplier_parts_created = models.PositiveIntegerField(
+        default=0, verbose_name=_('Supplier Parts Created')
+    )
+    errors = models.JSONField(default=list, blank=True, verbose_name=_('Errors'))
+    import_log = models.TextField(blank=True, verbose_name=_('Import Log'))
+
+    class Meta:
+        """Meta options for SupplierProductImportSession."""
+
+        verbose_name = _('Supplier Product Import')
+        verbose_name_plural = _('Supplier Product Imports')
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        """Return string representation."""
+        return f'{self.supplier_name} - {self.get_status_display()} ({self.timestamp.strftime("%Y-%m-%d %H:%M")})'

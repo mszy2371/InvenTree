@@ -25,6 +25,8 @@ class PartAdmin(admin.ModelAdmin):
         'category__name',
         'category__description',
         'IPN',
+        'keywords',  # Search by keywords (we put SKU there when creating from invoice)
+        'supplier_parts__SKU',  # Search by supplier SKU
     )
 
     autocomplete_fields = [

@@ -436,6 +436,23 @@ export default function PurchaseOrderDetail() {
     preFormWarning: t`Mark this order as complete`
   });
 
+  const receiveAllItems = useCreateApiFormModal({
+    url: apiUrl(ApiEndpoints.purchase_order_receive_all, order.pk),
+    title: 'Receive All Items',
+    successMessage: 'All items received',
+    timeout: 30000,
+    fields: {
+      location: {
+        filters: {
+          structural: false
+        }
+      }
+    },
+    onFormSuccess: refreshInstance,
+    preFormWarning:
+      'Receive ALL remaining items for this order. This will create stock entries for all unreceived line items.'
+  });
+
   const poActions = useMemo(() => {
     const canEdit: boolean = user.hasChangeRole(UserRoles.purchase_order);
 
@@ -461,6 +478,13 @@ export default function PurchaseOrderDetail() {
         hidden={!canIssue}
         color='blue'
         onClick={issueOrder.open}
+      />,
+      <PrimaryActionButton
+        title='Receive All'
+        icon='download'
+        hidden={!canComplete}
+        color='teal'
+        onClick={receiveAllItems.open}
       />,
       <PrimaryActionButton
         title={t`Complete Order`}
@@ -539,6 +563,7 @@ export default function PurchaseOrderDetail() {
       {holdOrder.modal}
       {cancelOrder.modal}
       {completeOrder.modal}
+      {receiveAllItems.modal}
       {editPurchaseOrder.modal}
       {duplicatePurchaseOrder.modal}
       <InstanceDetail

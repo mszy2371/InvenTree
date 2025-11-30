@@ -1044,6 +1044,104 @@ class PurchaseOrderReceiveSerializer(serializers.Serializer):
         return items
 
 
+class PurchaseOrderReceiveAllSerializer(serializers.Serializer):
+    """Serializer for receiving ALL remaining items against a PurchaseOrder."""
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = ['location']
+
+    location = serializers.PrimaryKeyRelatedField(
+        queryset=stock.models.StockLocation.objects.all(),
+        many=False,
+        required=False,
+        allow_null=True,
+        label=_('Location'),
+        help_text=_('Select destination location for received items'),
+    )
+
+    def validate(self, data):
+        """Custom validation for the serializer."""
+        super().validate(data)
+
+        order = self.context['order']
+
+        # Check order status (must be PLACED = 20)
+        if order.status != 20:
+            raise ValidationError(_('Order must be in PLACED status to receive items'))
+
+        # Check that there are items to receive
+        has_items_to_receive = False
+        for line in order.lines.all():
+            if line.quantity > line.received:
+                has_items_to_receive = True
+                break
+
+        if not has_items_to_receive:
+            raise ValidationError(_('No items remaining to receive'))
+
+        return data
+
+    def save(self):
+        """Receive all remaining items for the order."""
+        data = self.validated_data
+        order = self.context['order']
+        request = self.context.get('request')
+        _user = request.user if request else None
+
+        location = data.get('location') or order.destination
+
+        if not location:
+            # Try to get first non-structural location
+            location = stock.models.StockLocation.objects.filter(
+                structural=False
+            ).first()
+
+        received_items = []
+
+        for line_item in order.lines.all():
+            remaining = line_item.quantity - line_item.received
+
+            if remaining <= 0:
+                continue  # Already fully received
+
+            if not line_item.part or not line_item.part.part:
+                continue  # Skip items without parts
+
+            # Determine destination for this line item
+            destination = line_item.destination or location
+
+            if not destination:
+                continue  # Skip if no destination
+
+            # Create stock item
+            stock_item = stock.models.StockItem.objects.create(
+                part=line_item.part.part,  # SupplierPart -> Part
+                supplier_part=line_item.part,
+                location=destination,
+                quantity=remaining,
+                purchase_order=order,
+                purchase_price=line_item.purchase_price,
+            )
+
+            # Update line item received count
+            line_item.received += remaining
+            line_item.save()
+
+            received_items.append(stock_item)
+
+        # Check if order should be marked as complete
+        all_received = all(line.received >= line.quantity for line in order.lines.all())
+
+        if all_received:
+            # Mark order as complete (status 30)
+            order.status = 30  # PurchaseOrderStatus.COMPLETE
+            order.save()
+
+        return received_items
+
+
 @register_importer()
 class SalesOrderSerializer(
     NotesFieldMixin,
