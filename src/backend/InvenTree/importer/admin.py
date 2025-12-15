@@ -103,7 +103,7 @@ def import_supplier_products_action(modeladmin, request, queryset):
         session.save()
 
         # Read CSV file
-        session.data_file.open('r')
+        session.data_file.open('rb')
         csv_content = session.data_file.read().decode('utf-8')
         session.data_file.close()
 
@@ -118,7 +118,7 @@ def import_supplier_products_action(modeladmin, request, queryset):
 
         # Run import
         product_importer = SupplierProductImporter(verbose=True)
-        result = product_importer.import_all([(tmp_path, session.supplier_name)])
+        result = product_importer.import_all([(tmp_path, session.supplier.name)])
 
         # Update session with results
         session.parts_created = result['created_parts']
@@ -128,19 +128,8 @@ def import_supplier_products_action(modeladmin, request, queryset):
             importer.models.SupplierProductImportSession.StatusChoices.COMPLETED
         )
 
-        # Build log
-        log_lines = [
-            '✅ Import completed successfully',
-            f'   • Parts created: {result["created_parts"]}',
-            f'   • Supplier parts created: {result["created_supplier_parts"]}',
-            f'   • Total unique products: {result["total_unique_products"]}',
-        ]
-        if result.get('errors'):
-            log_lines.append(f'   • Errors: {len(result["errors"])}')
-            for error in result['errors'][:5]:
-                log_lines.append(f'     - {error}')
-
-        session.import_log = '\n'.join(log_lines)
+        # Save full import log
+        session.import_log = product_importer.get_log()
         session.save()
 
         # Clean up temp file
@@ -179,14 +168,14 @@ class SupplierProductImportSessionAdmin(admin.ModelAdmin):
     """Admin interface for SupplierProductImportSession."""
 
     list_display = [
-        'supplier_name',
+        'supplier',
         'status',
         'parts_created',
         'supplier_parts_created',
         'timestamp',
     ]
-    list_filter = ['status', 'timestamp']
-    search_fields = ['supplier_name']
+    list_filter = ['status', 'timestamp', 'supplier']
+    search_fields = ['supplier__name']
     actions = [import_supplier_products_action]
 
     readonly_fields = [
@@ -201,7 +190,7 @@ class SupplierProductImportSessionAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             'Basic Information',
-            {'fields': ('supplier_name', 'status', 'timestamp', 'updated', 'user')},
+            {'fields': ('supplier', 'status', 'timestamp', 'updated', 'user')},
         ),
         ('CSV File', {'fields': ('data_file',)}),
         (

@@ -28,12 +28,19 @@ class SupplierProductImporter:
         self.created_parts = []
         self.created_supplier_parts = []
         self.errors = []
+        self.log_messages = []  # Collect all log messages
+        self.used_ipns = set()  # Track IPNs used in this session
 
     def log(self, msg):
         """Log message if verbose."""
+        self.log_messages.append(msg)
         if self.verbose:
             logger.info(msg)
         print(msg)
+
+    def get_log(self) -> str:
+        """Get all collected log messages as a string."""
+        return '\n'.join(self.log_messages)
 
     def load_csv_file(self, filepath: str, supplier_name: str) -> list[dict]:
         """Load CSV file and return list of product dictionaries.
@@ -71,10 +78,37 @@ class SupplierProductImporter:
             return []
 
     def _load_standard_csv(self, filepath: str) -> list[dict]:
-        """Load standard format CSV (Shure, Connect Beauty, Cherry)."""
-        with open(filepath, encoding='utf-8') as f:
+        """Load standard format CSV (Shure, Connect Beauty, Cherry).
+
+        Normalizes various column names to standard format.
+        """
+        with open(filepath, encoding='utf-8-sig') as f:  # utf-8-sig handles BOM
             reader = csv.DictReader(f)
-            return list(reader)
+            products = []
+            for row in reader:
+                # Normalize column names to handle different formats
+                normalized = {
+                    'SKU': row.get('SKU', '') or row.get('Product Code', '') or '',
+                    'Product Name': row.get('Product Name', '')
+                    or row.get('Name', '')
+                    or row.get('Title', '')
+                    or '',
+                    'Brand': row.get('Brand', '') or row.get('Manufacturer', '') or '',
+                    'Barcode': row.get('Barcode', '') or row.get('EAN', '') or '',
+                    'Category': row.get('Category', '') or '',
+                    'Unit Price (GBP)': row.get('Unit Price (GBP)', '')
+                    or row.get('Unit Price', '')
+                    or row.get('Price', '')
+                    or '',
+                }
+                # Only add if we have a valid product name and SKU (skip N/A)
+                if (
+                    normalized['Product Name']
+                    and normalized['SKU']
+                    and normalized['SKU'].upper() != 'N/A'
+                ):
+                    products.append(normalized)
+            return products
 
     def _load_wts_csv(self, filepath: str) -> list[dict]:
         """Load WTS format CSV - normalize to standard columns."""
@@ -121,7 +155,7 @@ class SupplierProductImporter:
         for row in reader:
             # Normalize to standard format
             normalized = {
-                'SKU': row.get('Title', '')[:50],  # Use Title as SKU (first 50 chars)
+                'SKU': row.get('Title', '')[:100],  # Use Title as SKU (first 100 chars)
                 'Product Name': row.get('Title', ''),
                 'Brand': 'Very Cosmetics',
                 'Barcode': row.get('Barcode', '') or '',
@@ -148,20 +182,14 @@ class SupplierProductImporter:
         except:
             return None
 
-    def generate_unique_ipn(self, sku: str, name: str) -> str:
-        """Generate a unique IPN based on SKU hash.
+    def generate_ipn(self, sku: str, name: str) -> str:
+        """Generate IPN based on SKU hash.
 
         Format: IPN-XXXXXXXX where XXXXXXXX is MD5 hash of SKU+name.
         """
-        # Create hash from SKU to ensure uniqueness
         hash_input = f'{sku}-{name}'.encode()
         hash_hex = hashlib.md5(hash_input).hexdigest()[:8].upper()
-
         return f'IPN-{hash_hex}'
-
-    def ipn_exists(self, ipn: str) -> bool:
-        """Check if IPN already exists in database."""
-        return Part.objects.filter(IPN=ipn).exists()
 
     def deduplicate_products(self) -> dict[str, dict]:
         """Process products by SKU (not barcode).
@@ -243,13 +271,30 @@ class SupplierProductImporter:
         return category
 
     def create_part(self, product_data: dict) -> Optional[Part]:
-        """Create a Part from product data with custom IPN based on SKU."""
+        """Create a Part from product data with custom IPN based on SKU.
+
+        If Part with same IPN already exists, returns existing Part.
+        """
         try:
             # Truncate name to max 100 chars (model limit)
             name = product_data['name'][:100]
 
-            # Generate unique IPN from SKU
-            ipn = self.generate_unique_ipn(product_data['sku'], product_data['name'])
+            # Generate IPN from SKU+name
+            ipn = self.generate_ipn(product_data['sku'], product_data['name'])
+
+            # Check if Part with this IPN already exists in DB
+            existing_part = Part.objects.filter(IPN=ipn).first()
+            if existing_part:
+                self.log(f'   ⏭ Part already exists: {existing_part.name} (IPN: {ipn})')
+                return existing_part
+
+            # Check if we already created this in current session
+            if ipn in self.used_ipns:
+                self.log(f'   ⏭ Part with IPN {ipn} already created in this session')
+                return None
+
+            # Track this IPN as used
+            self.used_ipns.add(ipn)
 
             # Create part with custom IPN
             part = Part.objects.create(
@@ -330,10 +375,16 @@ class SupplierProductImporter:
         products_by_sku = self.deduplicate_products()
 
         # Step 3: Create parts and supplier parts
-        self.log('\n📦 Creating Parts and SupplierParts...\n')
+        total_products = len(products_by_sku)
+        self.log(
+            f'\n📦 Creating Parts and SupplierParts ({total_products} products)...\n'
+        )
 
-        for _sku, product_data in products_by_sku.items():
-            self.log(f'\n📌 Product: {product_data["name"]}')
+        for idx, (_sku, product_data) in enumerate(products_by_sku.items(), 1):
+            # Progress log every 50 products or at start/end
+            if idx == 1 or idx % 50 == 0 or idx == total_products:
+                progress = (idx / total_products) * 100
+                self.log(f'⏳ Progress: {idx}/{total_products} ({progress:.1f}%)')
 
             # Create Part
             part = self.create_part(product_data)

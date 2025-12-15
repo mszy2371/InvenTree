@@ -20,6 +20,7 @@ import importer.tasks
 import importer.validators
 import InvenTree.helpers
 from common.models import RenderChoices
+from company.models import Company
 from importer.status_codes import DataImportStatusCode
 
 logger = structlog.get_logger('inventree')
@@ -798,10 +799,12 @@ class SupplierProductImportSession(models.Model):
         verbose_name=_('CSV File'),
         help_text=_('CSV file containing supplier product data'),
     )
-    supplier_name = models.CharField(
-        max_length=255,
-        verbose_name=_('Supplier Name'),
-        help_text=_('Name of the supplier for these products'),
+    supplier = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        limit_choices_to={'is_supplier': True},
+        verbose_name=_('Supplier'),
+        help_text=_('Supplier for these products'),
     )
 
     # Status
@@ -831,4 +834,4 @@ class SupplierProductImportSession(models.Model):
 
     def __str__(self):
         """Return string representation."""
-        return f'{self.supplier_name} - {self.get_status_display()} ({self.timestamp.strftime("%Y-%m-%d %H:%M")})'
+        return f'{self.supplier.name} - {self.get_status_display()} ({self.timestamp.strftime("%Y-%m-%d %H:%M")})'

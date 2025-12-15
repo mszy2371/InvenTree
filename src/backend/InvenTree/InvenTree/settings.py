@@ -301,6 +301,7 @@ INSTALLED_APPS = [
     'data_exporter.apps.DataExporterConfig',
     'importer.apps.ImporterConfig',
     'invoice_manager.apps.InvoiceManagerConfig',
+    'amazon_sales.apps.AmazonSalesConfig',
     'web',
     'generic',
     'InvenTree.apps.InvenTreeConfig',  # InvenTree app runs last
