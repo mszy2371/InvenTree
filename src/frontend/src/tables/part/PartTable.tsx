@@ -26,7 +26,7 @@ import ImportPartWizard from '../../components/wizards/ImportPartWizard';
 import OrderPartsWizard from '../../components/wizards/OrderPartsWizard';
 import { formatDecimal, formatPriceRange } from '../../defaults/formatters';
 import { dataImporterSessionFields } from '../../forms/ImporterForms';
-import { usePartFields } from '../../forms/PartForms';
+import { useMergeParts, usePartFields } from '../../forms/PartForms';
 import { InvenTreeIcon } from '../../functions/icons';
 import {
   useBulkEditApiFormModal,
@@ -470,6 +470,11 @@ export function PartListTable({
 
   const orderPartsWizard = OrderPartsWizard({ parts: table.selectedRecords });
 
+  const mergeParts = useMergeParts({
+    items: table.selectedRecords,
+    refresh: table.refreshTable
+  });
+
   const supplierPlugins = usePluginsWithMixin('supplier');
   const importPartWizard = ImportPartWizard({
     categoryId: initialPartData.category
@@ -526,6 +531,16 @@ export function PartListTable({
             onClick: () => {
               orderPartsWizard.openWizard();
             }
+          },
+          {
+            name: 'Merge Parts',
+            icon: <InvenTreeIcon icon='merge' />,
+            tooltip: 'Merge selected parts into one',
+            hidden: !user.hasChangeRole(UserRoles.part),
+            disabled: table.selectedRecords.length < 2,
+            onClick: () => {
+              mergeParts.open();
+            }
           }
         ]}
       />,
@@ -568,6 +583,7 @@ export function PartListTable({
       {editPart.modal}
       {setCategory.modal}
       {importParts.modal}
+      {mergeParts.modal}
       {orderPartsWizard.wizard}
       {importPartWizard.wizard}
       <InvenTreeTable

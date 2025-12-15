@@ -615,6 +615,18 @@ class PartCopyBOM(CreateAPI):
         return ctx
 
 
+class PartMerge(CreateAPI):
+    """API endpoint for merging multiple parts into one.
+
+    The first part in the list becomes the 'base' part.
+    All related objects (stock items, supplier parts, etc.) are moved to the base part.
+    The merged parts are then deleted.
+    """
+
+    queryset = Part.objects.all()
+    serializer_class = part_serializers.PartMergeSerializer
+
+
 class PartValidateBOM(RetrieveUpdateAPI):
     """API endpoint for 'validating' the BOM for a given Part."""
 
@@ -1978,6 +1990,8 @@ part_api_urls = [
             path('', PartDetail.as_view(), name='api-part-detail'),
         ]),
     ),
+    # Endpoint for merging multiple parts
+    path('merge/', PartMerge.as_view(), name='api-part-merge'),
     path('', PartList.as_view(), name='api-part-list'),
 ]
 

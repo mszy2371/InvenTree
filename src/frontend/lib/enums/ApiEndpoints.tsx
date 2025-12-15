@@ -118,6 +118,7 @@ export enum ApiEndpoints {
   part_requirements = 'part/:id/requirements/',
   part_serial_numbers = 'part/:id/serial-numbers/',
   part_scheduling = 'part/:id/scheduling/',
+  part_merge = 'part/merge/',
   part_pricing_internal = 'part/internal-price/',
   part_pricing_sale = 'part/sale-price/',
   part_stocktake_list = 'part/stocktake/',
