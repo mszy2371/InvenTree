@@ -1,11 +1,20 @@
 import { t } from '@lingui/core/macro';
-import { IconBuildingStore, IconCopy, IconPackages } from '@tabler/icons-react';
+import {
+  IconBuildingStore,
+  IconCopy,
+  IconPackages,
+  IconX
+} from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { apiUrl } from '@lib/functions/Api';
 import type { ApiFormFieldSet } from '@lib/types/Forms';
+import { ActionIcon, Alert, List, Table, Text } from '@mantine/core';
+import type { TableFieldRowProps } from '../components/forms/fields/TableField';
+import { Thumbnail } from '../components/images/Thumbnail';
 import { useApi } from '../contexts/ApiContext';
+import { useCreateApiFormModal } from '../hooks/UseForm';
 import { useGlobalSettingsState } from '../states/SettingsStates';
 
 /**
@@ -328,4 +337,138 @@ export function partStocktakeFields(): ApiFormFieldSet {
     cost_max_currency: {},
     note: {}
   };
+}
+
+/**
+ * Row component for displaying a Part in the merge modal
+ */
+function PartMergeRow({
+  record,
+  onRemove
+}: {
+  record: any;
+  onRemove?: () => void;
+}) {
+  return (
+    <Table.Tr key={record.pk}>
+      <Table.Td>
+        <Thumbnail
+          size={40}
+          src={record.thumbnail || record.image}
+          alt={record.name}
+        />
+      </Table.Td>
+      <Table.Td>
+        <Text fw={500}>{record.name}</Text>
+        <Text size='xs' c='dimmed'>
+          {record.description}
+        </Text>
+      </Table.Td>
+      <Table.Td>{record.IPN}</Table.Td>
+      <Table.Td>{record.in_stock}</Table.Td>
+      <Table.Td>
+        {onRemove && (
+          <ActionIcon color='red' onClick={onRemove}>
+            <IconX size={16} />
+          </ActionIcon>
+        )}
+      </Table.Td>
+    </Table.Tr>
+  );
+}
+
+/**
+ * Generate fields for the Part merge form
+ */
+function partMergeFields(
+  items: any[],
+  setItems: (items: any[]) => void
+): ApiFormFieldSet {
+  if (!items || items.length === 0) {
+    return {};
+  }
+
+  const removeItem = (pk: number) => {
+    setItems(items.filter((item) => item.pk !== pk));
+  };
+
+  const fields: ApiFormFieldSet = {
+    items: {
+      field_type: 'table',
+      value: items.map((elem) => ({
+        part: elem.pk
+      })),
+      modelRenderer: (row: TableFieldRowProps) => {
+        const record = items.find((i) => i.pk === row.item.part);
+        if (!record) return null;
+        const isFirst = items.indexOf(record) === 0;
+        return (
+          <PartMergeRow
+            key={record.pk}
+            record={record}
+            onRemove={!isFirst ? () => removeItem(record.pk) : undefined}
+          />
+        );
+      },
+      headers: [
+        { title: '' },
+        { title: t`Part` },
+        { title: t`IPN` },
+        { title: t`In Stock` },
+        { title: '', style: { width: '50px' } }
+      ]
+    },
+    notes: {},
+    delete_merged_parts: {
+      value: true
+    }
+  };
+
+  return fields;
+}
+
+export interface PartMergeProps {
+  items: any[];
+  refresh: () => void;
+}
+
+/**
+ * Hook to create a modal for merging parts
+ */
+export function useMergeParts({ items, refresh }: PartMergeProps) {
+  const [mergeItems, setMergeItems] = useState<any[]>(items);
+
+  // Update mergeItems when items prop changes
+  useMemo(() => {
+    setMergeItems(items);
+  }, [items]);
+
+  const fields = useMemo(() => {
+    return partMergeFields(mergeItems, setMergeItems);
+  }, [mergeItems]);
+
+  return useCreateApiFormModal({
+    url: ApiEndpoints.part_merge,
+    fields: fields,
+    title: 'Merge Parts',
+    size: '80%',
+    successMessage: 'Parts merged successfully',
+    preFormContent: (
+      <Alert title='Merge Parts' color='yellow' mb='md'>
+        <List>
+          <List.Item>
+            The first part in the list will be the target part
+          </List.Item>
+          <List.Item>
+            All stock items, supplier parts, and other related data will be
+            moved to the target part
+          </List.Item>
+          <List.Item>This operation cannot be reversed!</List.Item>
+        </List>
+      </Alert>
+    ),
+    onFormSuccess: () => {
+      refresh();
+    }
+  });
 }

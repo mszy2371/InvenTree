@@ -478,6 +478,15 @@ class PurchaseOrderIssue(PurchaseOrderContextMixin, CreateAPI):
     serializer_class = serializers.PurchaseOrderIssueSerializer
 
 
+class PurchaseOrderReceiveAll(PurchaseOrderContextMixin, CreateAPI):
+    """API endpoint to receive ALL remaining items for a PurchaseOrder.
+
+    This will iterate through all line items and receive any remaining quantity.
+    """
+
+    serializer_class = serializers.PurchaseOrderReceiveAllSerializer
+
+
 @extend_schema(responses={201: stock_serializers.StockItemSerializer(many=True)})
 class PurchaseOrderReceive(PurchaseOrderContextMixin, CreateAPI):
     """API endpoint to receive stock items against a PurchaseOrder.
@@ -1902,6 +1911,11 @@ order_api_urls = [
                         'receive/',
                         PurchaseOrderReceive.as_view(),
                         name='api-po-receive',
+                    ),
+                    path(
+                        'receive-all/',
+                        PurchaseOrderReceiveAll.as_view(),
+                        name='api-po-receive-all',
                     ),
                     # PurchaseOrder detail API endpoint
                     path('', PurchaseOrderDetail.as_view(), name='api-po-detail'),

@@ -118,6 +118,7 @@ export enum ApiEndpoints {
   part_requirements = 'part/:id/requirements/',
   part_serial_numbers = 'part/:id/serial-numbers/',
   part_scheduling = 'part/:id/scheduling/',
+  part_merge = 'part/merge/',
   part_pricing_internal = 'part/internal-price/',
   part_pricing_sale = 'part/sale-price/',
   part_stocktake_list = 'part/stocktake/',
@@ -172,6 +173,7 @@ export enum ApiEndpoints {
   purchase_order_line_list = 'order/po-line/',
   purchase_order_extra_line_list = 'order/po-extra-line/',
   purchase_order_receive = 'order/po/:id/receive/',
+  purchase_order_receive_all = 'order/po/:id/receive-all/',
 
   sales_order_list = 'order/so/',
   sales_order_issue = 'order/so/:id/issue/',

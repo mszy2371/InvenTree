@@ -1942,3 +1942,201 @@ class PartCopyBOMSerializer(serializers.Serializer):
             include_inherited=data.get('include_inherited', False),
             copy_substitutes=data.get('copy_substitutes', True),
         )
+
+
+class PartMergeItemSerializer(serializers.Serializer):
+    """Serializer for a single Part within the PartMergeSerializer class."""
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = ['part']
+
+    part = serializers.PrimaryKeyRelatedField(
+        queryset=Part.objects.all(),
+        many=False,
+        required=True,
+        allow_null=False,
+        label=_('Part'),
+        help_text=_('Select part to merge'),
+    )
+
+
+class PartMergeSerializer(serializers.Serializer):
+    """Serializer for merging multiple parts into one.
+
+    The first part in the list is the "base" part that will absorb all others.
+    All related objects (stock items, supplier parts, parameters, etc.) are moved
+    to the base part, and the other parts are deleted.
+    """
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = ['items', 'notes', 'delete_merged_parts']
+
+    items = PartMergeItemSerializer(many=True, required=True)
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        label=_('Notes'),
+        help_text=_('Notes for the merge operation'),
+    )
+
+    delete_merged_parts = serializers.BooleanField(
+        required=False,
+        default=True,
+        label=_('Delete merged parts'),
+        help_text=_('Delete the merged parts after moving all related objects'),
+    )
+
+    def validate(self, data):
+        """Validate that at least two parts are provided and they are unique."""
+        data = super().validate(data)
+
+        items = data.get('items', [])
+
+        if len(items) < 2:
+            raise ValidationError(_('At least two parts must be provided'))
+
+        unique_parts = set()
+        for element in items:
+            part = element['part']
+            if part.pk in unique_parts:
+                raise ValidationError(_('Duplicate parts'))
+            unique_parts.add(part.pk)
+
+        # The base part is the first in the list
+        data['base_part'] = items[0]['part']
+
+        return data
+
+    @transaction.atomic
+    def save(self):
+        """Perform the merge operation.
+
+        Move all related objects from other parts to the base part,
+        then optionally delete the merged parts.
+        """
+        data = self.validated_data
+        base_part = data['base_part']
+        items = data['items'][1:]  # Skip the first (base) part
+        delete_merged = data.get('delete_merged_parts', True)
+
+        merged_count = 0
+
+        for element in items:
+            part = element['part']
+
+            # Move all StockItems to base part
+            stock_items = stock.models.StockItem.objects.filter(part=part)
+            stock_items.update(part=base_part)
+
+            # Move all SupplierParts to base part
+            supplier_parts = company.models.SupplierPart.objects.filter(part=part)
+            supplier_parts.update(part=base_part)
+
+            # Move all ManufacturerParts to base part
+            manufacturer_parts = company.models.ManufacturerPart.objects.filter(
+                part=part
+            )
+            manufacturer_parts.update(part=base_part)
+
+            # Move all PartParameters (skip duplicates)
+            for param in PartParameter.objects.filter(part=part):
+                if not PartParameter.objects.filter(
+                    part=base_part, template=param.template
+                ).exists():
+                    param.part = base_part
+                    param.save()
+                else:
+                    param.delete()
+
+            # Move all BomItems where this part is the sub_part
+            bom_items = BomItem.objects.filter(sub_part=part)
+            bom_items.update(sub_part=base_part)
+
+            # Move all BomItems where this part is the parent (assembly)
+            for bom_item in BomItem.objects.filter(part=part):
+                # Check if the base part already has this sub_part
+                if not BomItem.objects.filter(
+                    part=base_part, sub_part=bom_item.sub_part
+                ).exists():
+                    bom_item.part = base_part
+                    bom_item.save()
+                else:
+                    bom_item.delete()
+
+            # Move BuildOrders
+            from build.models import Build
+
+            Build.objects.filter(part=part).update(part=base_part)
+
+            # Move SalesOrderLineItems
+            from order.models import SalesOrderLineItem
+
+            SalesOrderLineItem.objects.filter(part=part).update(part=base_part)
+
+            # Move PurchaseOrderLineItems (via SupplierPart - already moved above)
+
+            # Move PartRelated items
+            for related in PartRelated.objects.filter(part_1=part):
+                if not PartRelated.objects.filter(
+                    part_1=base_part, part_2=related.part_2
+                ).exists():
+                    related.part_1 = base_part
+                    related.save()
+                else:
+                    related.delete()
+
+            for related in PartRelated.objects.filter(part_2=part):
+                if not PartRelated.objects.filter(
+                    part_1=related.part_1, part_2=base_part
+                ).exists():
+                    related.part_2 = base_part
+                    related.save()
+                else:
+                    related.delete()
+
+            # Move PartTestTemplates (skip duplicates by test_name)
+            for test in PartTestTemplate.objects.filter(part=part):
+                if not PartTestTemplate.objects.filter(
+                    part=base_part, test_name=test.test_name
+                ).exists():
+                    test.part = base_part
+                    test.save()
+                else:
+                    test.delete()
+
+            # Move Part stars
+            for star in PartStar.objects.filter(part=part):
+                if not PartStar.objects.filter(part=base_part, user=star.user).exists():
+                    star.part = base_part
+                    star.save()
+                else:
+                    star.delete()
+
+            # Move price breaks
+            PartSellPriceBreak.objects.filter(part=part).update(part=base_part)
+            PartInternalPriceBreak.objects.filter(part=part).update(part=base_part)
+
+            # Move stocktake records
+            PartStocktake.objects.filter(part=part).update(part=base_part)
+
+            merged_count += 1
+
+            if delete_merged:
+                # Deactivate the part first (required before deletion)
+                part_name = str(part)
+                part.active = False
+                part.save()
+                # Now delete the merged part
+                part.delete()
+                logger.info(f'Deleted merged part: {part_name}')
+
+        logger.info(
+            f'Merged {merged_count} parts into {base_part} (ID: {base_part.pk})'
+        )
+
+        return base_part
