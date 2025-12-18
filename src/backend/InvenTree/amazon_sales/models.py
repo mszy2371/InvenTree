@@ -89,6 +89,16 @@ class AmazonSalesReport(models.Model):
         blank=True, verbose_name=_('Notes'), help_text=_('Processing notes and logs')
     )
 
+    # Location for stock allocation
+    location = models.ForeignKey(
+        'stock.StockLocation',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_('Stock Location'),
+        help_text=_('Location to allocate stock from when creating sales orders'),
+    )
+
     # Statistics
     total_lines = models.IntegerField(default=0, verbose_name=_('Total Lines'))
     matched_lines = models.IntegerField(default=0, verbose_name=_('Matched Lines'))
@@ -112,9 +122,13 @@ class AmazonSalesReport(models.Model):
         Returns:
             Tuple of (lines_created, error_message)
         """
-        # Clear existing lines
+        # Clear existing lines and reset statistics
         self.lines.all().delete()
         self.notes = ''
+        self.total_lines = 0
+        self.matched_lines = 0
+        self.unmatched_lines = 0
+        self.orders_created = 0
 
         try:
             self.csv_file.seek(0)
@@ -157,6 +171,28 @@ class AmazonSalesReport(models.Model):
 
             self.total_lines = lines_created
             self.status = AmazonSalesReportStatus.PARSED
+            
+            # Extract date_from and date_to from shipment dates
+            if lines_created > 0:
+                dates = []
+                for line in self.lines.all():
+                    if line.shipment_date:
+                        try:
+                            # Parse ISO format datetime (e.g., "2024-10-31T22:01:54+00:00")
+                            from dateutil import parser as date_parser
+                            parsed_dt = date_parser.isoparse(line.shipment_date)
+                            dates.append(parsed_dt.date())
+                        except (ValueError, TypeError):
+                            pass
+                
+                if dates:
+                    self.date_from = min(dates)
+                    self.date_to = max(dates)
+            
+            # Calculate matched and unmatched lines
+            self.matched_lines = self.lines.filter(matched_part__isnull=False).count()
+            self.unmatched_lines = self.lines.filter(matched_part__isnull=True).count()
+            
             self.save()
 
             return lines_created, ''
@@ -188,6 +224,12 @@ class AmazonSalesReport(models.Model):
         except PartParameterTemplate.DoesNotExist:
             self.log('Error: ASIN parameter template not found!')
             return 0, self.lines.count()
+
+        # Reset match statuses before matching
+        for line in self.lines.all():
+            line.matched_part = None
+            line.match_status = AmazonSalesReportLine.MATCH_PENDING
+            line.save()
 
         matched = 0
         unmatched = 0
@@ -263,39 +305,45 @@ class AmazonSalesReport(models.Model):
                     },
                 )
 
-                # Check if SO already exists for this report
-                report_reference = f'AMZ-{self.name or self.pk}'
-                existing = SalesOrder.objects.filter(
-                    customer_reference=report_reference
-                ).first()
-
-                if existing:
-                    self.log(f'Sales Order already exists: {existing.reference}')
-                    self.status = AmazonSalesReportStatus.COMPLETED
-                    self.save()
-                    return 0, 0, ['Sales Order already exists']
+                # Create a unique reference for this report (always create new SO)
+                # Use timestamp to ensure uniqueness even for identical reports
+                from django.utils import timezone
+                timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+                report_reference = f'AMZ-{self.name or self.pk}-{timestamp}'
 
                 # Create single Sales Order (start as PENDING)
                 so = SalesOrder.objects.create(
                     customer=customer,
                     customer_reference=report_reference,
                     description=f'Amazon Sales Report: {self.name or self.pk}',
-                    target_date=self.date_to,
+                    target_date=timezone.now().date(),
                     status=SalesOrderStatus.PENDING.value,
                 )
                 self.log(f'Created Sales Order: {so.reference}')
 
                 # Create default shipment
                 from order.models import SalesOrderAllocation, SalesOrderShipment
-
-                default_shipment = SalesOrderShipment.objects.create(
-                    order=so, reference='1', shipment_date=self.date_to
-                )
-                self.log(f'Created Shipment: {default_shipment.reference}')
+                from dateutil import parser as date_parser
 
                 # Process each matched line
                 for line in self.lines.filter(matched_part__isnull=False):
                     try:
+                        # Parse shipment date from Amazon report
+                        line_date = timezone.now().date()
+                        if line.shipment_date:
+                            try:
+                                parsed_dt = date_parser.isoparse(line.shipment_date)
+                                line_date = parsed_dt.date()
+                            except (ValueError, TypeError):
+                                pass
+
+                        # Create/get shipment for this specific date
+                        shipment, _ = SalesOrderShipment.objects.get_or_create(
+                            order=so,
+                            reference=line_date.isoformat(),  # Use date as reference
+                            defaults={'shipment_date': line_date}
+                        )
+
                         part = line.matched_part
 
                         # Ensure part is salable
@@ -315,25 +363,36 @@ class AmazonSalesReport(models.Model):
                             quantity=line.quantity,
                             sale_price=unit_price,
                             shipped=line.quantity,
+                            target_date=line_date,
                         )
 
-                        # Find stock item to allocate
+                        # Find stock item from required location
+                        if not self.location:
+                            raise ValueError('Stock Location is required to allocate stock items')
+                        
                         stock_item = StockItem.objects.filter(
-                            part=part, quantity__gte=line.quantity
+                            part=part,
+                            location=self.location,
+                            quantity__gte=line.quantity
                         ).first()
 
-                        if stock_item:
-                            # Create allocation
-                            SalesOrderAllocation.objects.create(
-                                line=so_line,
-                                shipment=default_shipment,
-                                item=stock_item,
-                                quantity=line.quantity,
+                        if not stock_item:
+                            raise ValueError(
+                                f'{part.name}: insufficient stock in {self.location.name}. '
+                                f'Required: {line.quantity}'
                             )
 
-                            # Reduce stock
-                            stock_item.quantity -= line.quantity
-                            stock_item.save()
+                        # Create allocation
+                        SalesOrderAllocation.objects.create(
+                            line=so_line,
+                            shipment=shipment,
+                            item=stock_item,
+                            quantity=line.quantity,
+                        )
+
+                        # Reduce stock
+                        stock_item.quantity -= line.quantity
+                        stock_item.save()
 
                         line.sales_order = so
                         line.save()
@@ -347,7 +406,7 @@ class AmazonSalesReport(models.Model):
                 so.status = SalesOrderStatus.SHIPPED.value
                 so.save()
 
-                self.orders_created = 1
+                self.orders_created += 1
                 self.log(f'✅ Completed: {lines_processed} lines processed')
 
         except Exception as e:

@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock title %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 40px auto; padding: 20px;">
+    <h1 style="color: #fff; margin-bottom: 30px;">📦 {{ title }}</h1>
+
+    <div style="background-color: #d1ecf1; border: 1px solid #0c5460; border-radius: 4px; padding: 15px; margin-bottom: 20px;">
+        <strong style="color: #0c5460;">ℹ️ Info:</strong> <span style="color: #000;">This will create a complete backup of the database and media files.</span>
+    </div>
+
+    <div style="background-color: #e9ecef; border: 1px solid #495057; border-radius: 4px; padding: 20px; margin-bottom: 20px;">
+        <p style="margin: 0; color: #000;"><strong>Backup Directory:</strong> <code style="background-color: #fff; padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; color: #000;">{{ backup_dir }}</code></p>
+    </div>
+
+    <form method="post" style="background-color: white; border: 1px solid #ddd; border-radius: 4px; padding: 30px;">
+        {% csrf_token %}
+
+        <div style="margin-bottom: 20px;">
+            <label for="{{ form.backup_name.id_for_label }}" style="display: block; font-weight: bold; margin-bottom: 12px; color: #000; font-size: 18px;">
+                {{ form.backup_name.label }}
+            </label>
+            {{ form.backup_name }}
+            <p style="color: #666; margin-top: 8px; font-size: 14px;">
+                Optional: Add a custom name or comment to identify this backup (e.g., "before-upgrade", "monthly-2025-12")
+            </p>
+            {% if form.backup_name.errors %}
+                <div style="color: #dc3545; margin-top: 5px; font-weight: bold;">{{ form.backup_name.errors }}</div>
+            {% endif %}
+        </div>
+
+        <div style="margin-top: 30px; display: flex; gap: 10px;">
+            <button type="submit" style="background-color: #28a745; color: white; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                📦 Create Backup
+            </button>
+            <a href="../" style="background-color: #6c757d; color: white; border: none; padding: 12px 30px; border-radius: 4px; text-decoration: none; display: inline-block; font-size: 16px;">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock content %}

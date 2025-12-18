@@ -72,7 +72,7 @@ class AmazonSalesReportAdmin(admin.ModelAdmin):
         'notes',
     ]
     fieldsets = (
-        (None, {'fields': ('name', 'csv_file', 'date_from', 'date_to')}),
+        (None, {'fields': ('name', 'csv_file', 'date_from', 'date_to', 'location')}),
         (_('Status'), {'fields': ('status', 'created')}),
         (
             _('Statistics'),

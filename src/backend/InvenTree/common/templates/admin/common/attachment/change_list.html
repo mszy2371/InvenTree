@@ -1,0 +1,16 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+    {{ block.super }}
+    <li>
+        <a href="{% url 'admin:backup-create' %}" class="btn btn-high btn-success" style="background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block;">
+            📦 Create Backup
+        </a>
+    </li>
+    <li>
+        <a href="{% url 'admin:backup-restore' %}" class="btn btn-high btn-warning" style="background-color: #ffc107; color: black; padding: 8px 15px; text-decoration: none; border-radius: 4px; display: inline-block; margin-left: 10px;">
+            📥 Restore Backup
+        </a>
+    </li>
+{% endblock object-tools-items %}
