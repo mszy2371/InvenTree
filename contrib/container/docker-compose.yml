@@ -83,6 +83,8 @@ services:
         volumes:
             # Data volume must map to /home/inventree/data
             - ${INVENTREE_EXT_VOLUME}:/home/inventree/data:z
+            # Backup directory mounted separately
+            - ${INVENTREE_BACKUP_HOST_DIR}:/home/inventree/backups:z
         restart: unless-stopped
 
     # Background worker process handles long-running or periodic tasks
@@ -98,6 +100,8 @@ services:
         volumes:
             # Data volume must map to /home/inventree/data
             - ${INVENTREE_EXT_VOLUME}:/home/inventree/data:z
+            # Backup directory mounted separately
+            - ${INVENTREE_BACKUP_HOST_DIR}:/home/inventree/backups:z
         restart: unless-stopped
 
     # caddy acts as reverse proxy and static file server
