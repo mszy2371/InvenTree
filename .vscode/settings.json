@@ -4,5 +4,6 @@
   },
   "editor.codeActionsOnSave": {
     "quickfix.biome": "explicit"
-  }
+  },
+  "python-envs.pythonProjects": []
 }
